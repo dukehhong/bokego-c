@@ -1,63 +1,54 @@
-#include "policy_net.h"
 #include <iostream>
 #include <string>
-#include <fstream>
-#include "board.h"
 #include <chrono> 
-#include <torch/script.h>
+#include "board.h"
+#include "policy_net.h"
+#include "torch/script.h"
+#include "data_loader.h"
 
-void parseCSV(std::string &buffer, std::string board, std::string ko, int turn, std::string next){
-  std::stringstream ss(buffer);
-  std::getline(ss, buffer, ','); board = buffer;
-  std::getline(ss, buffer, ','); ko = buffer;
-  std::getline(ss, buffer, ','); turn = std::stoi(buffer);
-  std::getline(ss, buffer, ','); next = buffer;
+#include<fstream>
+typedef std::tuple<std::string, std::string, int, std::string> sample;
+
+void makeFeatues(DataLoader &dl, PolicyNet &model, std::vector<std::string>* lines, int i, int j){
+  Board game = Board(9);
+  for(int k=i; k<j; k++){
+    sample attr = dl.makeSample((*lines)[k]);
+    game.loadState(std::get<0>(attr), std::get<2>(attr), std::get<1>(attr));
+    model.features(game);
+  }
 }
 
 int main(int argc, const char* argv[]) {
-  // if (argc != 2) {
-  //   std::cerr << "usage: example-app <path-to-exported-script-module>\n";
-  //   return -1;
-  // }
+  DataLoader dl = DataLoader();
+  dl.mount("../data/boards_aug.csv");
+  std::cout << "Loading data..." << std::endl;
+  dl.process(0, 10000);
+  std::cout << "Finished loading data..." << std::endl;
+  auto s = dl.getSamples();
 
-
-  // torch::jit::script::Module module;
-  // try {
-  //   // Deserialize the ScriptModule from a file using torch::jit::load().
-  //   module = torch::jit::load(argv[1]);
-  // }
-  // catch (const c10::Error& e) {
-  //   std::cerr << "error loading the model\n";
-  //   return -1;
-  // }
-
-
-  //read csv
-  std::ifstream rs("../data/boards_aug.csv");
-  if(!rs.is_open()){
-    throw std::runtime_error("file cannot be open");
-  }
-  std::string buffer, board, next, ko;
-  int turn;
-  torch::Tensor sample;
-
-  //remove column names
-  std::getline(rs, buffer);
-
-  for(int i = 0; i<100; i++){
-    std::getline(rs, buffer);
-  }
-  PolicyNet model = PolicyNet();
   Board game = Board(9);
-  parseCSV(buffer, board, ko, turn, next);
-  game.loadState(board, turn, ko);
-  sample = model.features(game);
+  PolicyNet model = PolicyNet();
 
-  // std::vector<torch::jit::IValue> inputs;
-  // inputs.push_back(sample.unsqueeze(0));
-  // at::Tensor output = module.forward(inputs).toTensor();
-  // sample = torch::softmax(output.squeeze(0), 0);
-  // std::cout << torch::argmax(sample) << '\n';
+  int num_workers = 10;
+  int partition = (*s).size()/num_workers;
+  std::vector<std::thread> threads;
 
+  for(int i = 0; i<num_workers; i++){
+    threads.push_back(std::thread(makeFeatues, std::ref(dl), std::ref(model), s, i*partition, (i+1)*partition));
+  }
+
+  std::cout << "Making features..." << std::endl;
+  auto start = std::chrono::high_resolution_clock::now();
+
+  for(auto &thread : threads){
+    thread.join();
+  }
+
+  auto end = std::chrono::high_resolution_clock::now();
+  std::cout << "Finished making features..." << std::endl;
+
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+  std::cout << "Time: " << duration.count()*0.000001 << " seconds" << std::endl;
+  
   return 0;
 }
