@@ -106,8 +106,9 @@ void Board::loadState(std::string state, int turn, std::string ko){
     this->board_string = state;
     this->turn = turn;
     if(ko != "None"){
-        this->iKo = ko[0] - '0';
-        this->jKo = ko[1] - '0';
+        int num_ko = std::stoi(ko);
+        this->iKo = (num_ko/this->dim) + 1;
+        this->jKo = (num_ko%this->dim) + 1;
         this->isKo = true;
     }
     char pos;
