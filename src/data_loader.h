@@ -21,6 +21,7 @@ class DataLoader{
         void mount(std::string file);
         void process(int min = 0, int max = -1);
         std::vector<std::string>* getSamples();
+        sample makeSample(std::string line);
         int size();
     private:
         std::ifstream rs;

@@ -1,6 +1,6 @@
 #include "data_loader.h"
 
-sample makeSample(std::string line){
+sample DataLoader::makeSample(std::string line){
     std::string buffer;
     std::stringstream ss(line);
     std::string arr[4];
