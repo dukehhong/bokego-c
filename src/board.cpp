@@ -4,6 +4,7 @@
 #include <vector>
 #include <algorithm>
 #include <regex>
+#include <array>
 #define BORDER -1
 #define EMPTY 0
 #define BLACK 1
@@ -19,8 +20,8 @@ Board::Board(int n, const char* sgf ){
     this->jKo = -1;
     this->isKo = false;
     this->end = false;
+    this->lastMove = -1;
     std::vector< std::pair<int,int> > mvs;
-    this->moves = mvs; 
     this->board = new int*[n+2];
     this->visited = new bool*[n+2];
     for(int i = 0; i<n+2; i++){
@@ -36,6 +37,9 @@ Board::Board(int n, const char* sgf ){
         }
     }
     this->board_string = "";
+    for(int i =0; i<this->dim*this->dim;i ++){
+        this->board_string += ".";
+    }
     if(sgf != NULL) this->readSGF(sgf); 
 }
 
@@ -51,11 +55,9 @@ void Board::readSGF(const char* sgf){
                 match = *it;
                 if (match.str(1) == ""){
                     std::pair <int, int> mv = {-1,-1};
-                    this->moves.push_back(mv);
                 }
                 else{
                     std::pair <int, int> mv = {int(match.str(1)[0]-96), int(match.str(1)[1])-96};
-                    this->moves.push_back(mv); 
                 }
             }     
         }
@@ -98,19 +100,24 @@ void Board::loadState(int** state){
     }
 }
 
-void Board::loadState(std::string state, int turn, std::string ko){
+void Board::loadState(std::string state, int turn, int lastMove, int ko){
     if(state.length() != this->dim*this->dim){
         std::runtime_error("Cannot load state");
     }
 
     this->board_string = state;
     this->turn = turn;
-    if(ko != "None"){
-        int num_ko = std::stoi(ko);
-        this->iKo = (num_ko/this->dim) + 1;
-        this->jKo = (num_ko%this->dim) + 1;
-        this->isKo = true;
+    this->lastMove = lastMove;
+    
+    if(ko == -1){
+        this->iKo = -1;
+        this->jKo = -1;
+        this->isKo = false;
+    }else{
+        std::tie(this->iKo, this->jKo) = convertCoord(ko);
+        this->isKo = false;
     }
+
     char pos;
     int val;
     
@@ -147,6 +154,14 @@ std::string Board::stateToString(){
     return state;
 }
 
+int Board::getKo(){
+    if(this->iKo == -1 && this->jKo == -1){
+        return -1;
+    }else{
+        return convertCoord(this->iKo, this->jKo);
+    }
+}
+
 //sets visited matrix to all false
 void Board::resetVisit(){
     for(int i = 0; i < this->dim+2; i++){
@@ -162,12 +177,18 @@ void Board::disp(){
     for(int i = 0; i<this->dim+2; i++){
         for(int j = 0; j<this->dim+2; j++){
             color = this->board[i][j];
-            if(color == -1){
+            if(i == 0 && j == 0){
                 std::cout << "X" << " ";
+            }else if(color == -1){
+               if(i == 0 && j <= this->dim){
+                   std::cout << j << " ";
+               }else if(j == 0 && i <= this->dim){
+                   std::cout << i << " ";
+               }
             }else if(color == 0){
-                std::cout << "." << " ";
+                std::cout << "_" << " ";
             }else if(color == 1){
-                std::cout << "*" << " ";
+                std::cout << "X" << " ";
             }else if(color == 2){
                 std::cout << "O" << " ";
             }else{
@@ -177,8 +198,12 @@ void Board::disp(){
         std::cout << std::endl;
     }
     std::cout << "Turn: " << this->turn << "| White: " << this->wCap << " | Black: " << this->bCap << std::endl;
+    std::cout << "Ko:" << this->iKo << " " << this->jKo << std::endl;
     if (this->end)
         std::cout << "Game ended." << std::endl;
+    for(int i = 0; i<40; i++){
+        std::cout << "-";
+    }
     std::cout << std::endl;
 }
 
@@ -186,8 +211,8 @@ void Board::disp(){
 bool Board::play(int color, int i, int j){
     if(this->addStone(color, i,j)){
         this->turn ++;
-        std::pair<int,int> mv = {i,j};
-        this->moves.push_back(mv);
+        this->lastMove = convertCoord(i, j);
+        this->board_string = this->stateToString();
         return true;
     }
     return false;   
@@ -208,11 +233,6 @@ void Board::pass(int color){
 }
 
 //checks if move is valid
-//4 cases:
-// 1) self_atari = true, take = true, ko
-// 2) self_atari = false, take = true, then true
-// 3) self_atari = false, take = false, then true
-// 4) self_atari = true, take = false, then false
 bool Board::isValidMove(int color, int i, int j){
     if(this->end) return false;
     if(i == -1 && j== -1) return true;
@@ -233,15 +253,52 @@ bool Board::isValidMove(int color, int i, int j){
         }
     }
     this->board[i][j] = EMPTY;
-
+    //4 cases:
+    // 1) self_atari = true, take = true, ko
+    // 2) self_atari = false, take = true, then true
+    // 3) self_atari = false, take = false, then true
+    // 4) self_atari = true, take = false, then false
     if(self_atari && take){
-        this->isKo = true;
+        this->isKo = true; 
         return true;
     }else if(self_atari){
         return false;
     }else{
         this->iKo = -1;
         this->jKo = -1;
+        return true;
+    }
+}
+
+bool Board::PsuedoisValid(int color, int i, int j){
+    if(i == -1 && j== -1) return true;
+    if(this->board[i][j] != EMPTY) return false;
+    if(i == this->iKo && j == this->jKo) return false;
+
+    int op_color = (color%2) + 1;
+    bool take = false;
+    bool self_atari = false;
+
+    this->board[i][j] = color;
+    self_atari = !isAlive(color, i, j);
+    for(int k=-1; k<3; k++){
+        int a = i + (k%2);
+        int b = j + ((k-1)%2);
+        if(this->board[a][b] == op_color){
+            take = take | !isAlive(op_color, a, b); 
+        }
+    }
+    this->board[i][j] = EMPTY;
+    //4 cases:
+    // 1) self_atari = true, take = true, ko
+    // 2) self_atari = false, take = true, then true
+    // 3) self_atari = false, take = false, then true
+    // 4) self_atari = true, take = false, then false
+    if(self_atari && take){
+        return true;
+    }else if(self_atari){
+        return false;
+    }else{
         return true;
     }
 }
@@ -266,6 +323,9 @@ bool Board::addStone(int color, int i, int j){
                     this->iKo = a;
                     this->jKo = b;
                     this->isKo = false;
+                }else{
+                    this->iKo = -1;
+                    this->jKo = -1;
                 }
                 if(color == BLACK){
                     this->bCap += points;
@@ -274,6 +334,8 @@ bool Board::addStone(int color, int i, int j){
                 }
             }
         }
+
+
         return true;
     }
     return false;
@@ -350,7 +412,7 @@ std::pair<int,int> Board::countLibAndSize(int color, int i, int j){
 
 //returns number of stones that would be captured if stone is played
 int Board::potentialCaptureSize(int color, int i, int j){
-    if(!this->isValidMove(color, i, j)){
+    if(!this->PsuedoisValid(color, i, j)){
         return 0;
     }
     this->board[i][j] = color;
@@ -365,37 +427,6 @@ int Board::potentialCaptureSize(int color, int i, int j){
     }
     this->board[i][j] = EMPTY;
     return points;
-}
-
-int Board::getAllLiberties(int color){
-    int lib = 0;
-    for(int i = 1; i<= this->dim; i++){
-        for(int j = 1; j<=this->dim; j++){
-            
-            lib += this->getAllLibertiesHelper(color, i, j, false);
-            
-        }
-    }
-    this->loadState(this->board_string);
-    return lib;
-}
-
-int Board::getAllLibertiesHelper(int color, int i, int j, bool found){
-    int pos = this->board[i][j];
-    if(pos == EMPTY && found){
-        return 1;
-    }
-    if(pos != color || (pos == EMPTY && !found) ){
-        return 0;
-    }
-    this->board[i][j] = 9; //arbitary value
-    int lib = 0;
-    for(int k=-1; k<3; k++){
-        int a = i + (k%2);
-        int b = j + ((k-1)%2);
-        lib += getAllLibertiesHelper(color, a, b, true);
-    }
-    return lib;
 }
 
 int Board::playPseudoMove(int color, int i, int j){
@@ -419,24 +450,95 @@ int Board::getLibsAfterPlay(int color, int i, int j){
     return lib;
 }
 
-void Board::test(){
-    for(int i = 1;i<=this->dim; i++){
-        for(int j = 1; j<=this->dim; j++){
-            std::cout << this->getLibsAfterPlay(BLACK, i, j) << " ";
-        }
-    }
+std::pair<int, int> Board::convertCoord(int coord){
+    return std::make_pair((coord/this->dim) + 1, coord%this->dim + 1);
 }
 
-// returns the number of turns since move was played (if played since 8 turns return 8)
-int Board::getTurnsSince(int i, int j){
-    int k = 0;
-    while(k < this->moves.size() && k<8){
-        if(this->moves[this->moves.size() - 1 - k].first == i && this->moves[this->moves.size() - 1 - k].second == j){
-            return k + 1;
+int Board::convertCoord(int i, int j){
+    return (i-1)*9 + (j-1);
+}
+
+void Board::createSGF(std::string file_path){
+    std::ofstream os;
+    os.open(file_path);
+    os << "(;GM[1]SZ[9]KM[7]RU[Chinese]\n";
+    char p1,p2;
+    for(int i = 1; i<=9; i++){
+        for(int j =1; j<=9; j++){
+            p1 = i + 96;
+            p2 = j + 96;
+            if(this->board[i][j] == WHITE){
+                os << ";W[" << p1 << p2 << "]";
+            }else if(this->board[i][j] == BLACK){
+                os << ";B[" << p1 << p2 << "]";
+            }
         }
-        k++;
     }
-    return 8;
+    os <<")";
+    os.close();
+}
+
+std::string Board::getBoardString(){
+    return this->board_string;
+}
+
+//overload functions
+bool Board::play(int color, int mv){
+    std::pair<int, int> crds = convertCoord(mv);
+    return this->play(color, crds.first, crds.second);
+}
+
+bool Board::addStone(int color, int mv){
+    std::pair<int, int> crds = convertCoord(mv);
+    return this->addStone(color, crds.first, crds.second);
+}
+
+bool Board::isValidMove(int color, int mv){
+    std::pair<int, int> crds = convertCoord(mv);
+    return this->isValidMove(color, crds.first, crds.second);
+}
+
+bool Board::isAlive(int color, int mv){
+    std::pair<int, int> crds = convertCoord(mv);
+    return this->isAlive(color, crds.first, crds.second);
+}
+
+bool Board::checkAlive(int color, int mv){
+    std::pair<int, int> crds = convertCoord(mv);
+    return this->checkAlive(color, crds.first, crds.second);
+}
+
+int Board::removeStones(int color, int mv){
+    std::pair<int, int> crds = convertCoord(mv);
+    return this->removeStones(color, crds.first, crds.second);
+}
+
+int Board::getPos(int mv){
+    std::pair<int, int> crds = convertCoord(mv);
+    return this->getPos(crds.first, crds.second);
+}
+
+int Board::getScore(){
+    this->createSGF("./temp.sgf");
+    std::string cm = "gnugo --score --chinese-rules --komi 5.5 -l sgf temp.sgf";
+    std::array<char, 128> buffer;
+    std::string result;
+    std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cm.c_str(), "r"), pclose);
+    if (!pipe) {
+        throw std::runtime_error("popen() failed!");
+    }
+    while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
+        result += buffer.data();
+    }
+    std::remove("./temp.sgf");
+    switch(result[0]){
+        case 'B':
+            return 1;
+        case 'W':
+            return 0;
+        default:
+            return -1;
+    }
 }
 
 int Board::getPos(int i, int j){
@@ -447,12 +549,12 @@ int Board::getTurn(){
     return this->turn;
 }
 
-int** Board::getBoard(){
-    return this->board;
+int Board::getLastMove(){
+    return this->lastMove;
 }
 
-std::vector< std::pair<int,int> > Board::getMoves(){
-    return this->moves;
+int** Board::getBoard(){
+    return this->board;
 }
 
 Board::~Board(){
