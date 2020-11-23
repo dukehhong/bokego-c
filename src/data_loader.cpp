@@ -1,20 +1,9 @@
 #include "data_loader.h"
 
-sample DataLoader::makeSample(std::string line){
-    std::string buffer;
-    std::stringstream ss(line);
-    std::string arr[4];
-    int i = 0;
-    while(getline(ss, buffer, ',')){
-        arr[i] = buffer;
-        i++;
-    }
-    return std::make_tuple(arr[0], arr[1], std::stoi(arr[2]), arr[3]);
-}
-
 DataLoader::DataLoader(){
     this->isMounted = false;
     this->file = "";
+    this->column_names = "No column names";
 }
 
 void DataLoader::mount(std::string file){
@@ -31,8 +20,9 @@ void DataLoader::process(int min, int max){
     if(!this->isMounted){
         throw std::runtime_error("file is not mounted");
     }
-    //remove column names
+    //get column names
     getline(this->rs, line);
+    this->column_names = line;
 
     for(int i = 0; i<min; i++){
         getline(this->rs, line);
@@ -55,6 +45,13 @@ void DataLoader::process(int min, int max){
             total++;
         }
     }
+}
+
+std::string DataLoader::getColumnNames(){
+    if(!this->isMounted){
+        throw std::runtime_error("file is not mounted");
+    }
+    return this->column_names;
 }
 
 std::vector<std::string>* DataLoader::getSamples(){
