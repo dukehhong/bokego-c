@@ -5,8 +5,8 @@ Based off Google's DeepMind AlphaGo<sup>[1](#1)</sup>, BokeGo is a 9x9 Go bot tr
 ## Development
 - [x] parse SGF game files
 - [x] policy network + features
-- [ ] train policy net through GCP
-- [ ] monte carlo tree search
+- [x] train policy net through GCP
+- [x] monte carlo tree search
 
 
 ## Build
